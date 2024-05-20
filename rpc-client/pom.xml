@@ -61,7 +61,7 @@
                             <goal>run</goal>
                         </goals>
                         <configuration>
-                            <protocVersion>3.11.4</protocVersion>
+                            <protocVersion>3.6.0</protocVersion>
                             <addSources>none</addSources>
                             <includeStdTypes>true</includeStdTypes>
                             <outputDirectory>src/main/java</outputDirectory>
@@ -90,5 +90,29 @@
             <scope>compile</scope>
         </dependency>
     </dependencies>
+
+    <distributionManagement>
+        <repository>
+            <id>nexus</id>
+            <name>Releases</name>
+            <url>https://nexus.tinypace.com/repository/maven-releases</url>
+        </repository>
+        <snapshotRepository>
+            <id>user-snapshots</id>
+            <url>https://nexus.tinypace.com/repository/maven-snapshots</url>
+        </snapshotRepository>
+    </distributionManagement>
+
+    <repositories>
+        <repository>
+            <snapshots>
+                <enabled>true</enabled>
+                <updatePolicy>always</updatePolicy>
+            </snapshots>
+            <id>releases</id>
+            <name>maven-releases</name>
+            <url>https://nexus.tinypace.com/repository/maven-public</url>
+        </repository>
+    </repositories>
 
 </project>
