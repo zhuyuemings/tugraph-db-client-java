@@ -11,19 +11,21 @@ import com.baidu.brpc.client.RpcClientOptions;
 import com.baidu.brpc.client.loadbalance.LoadBalanceStrategy;
 import com.baidu.brpc.protocol.Options;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
 import lgraph.Lgraph;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * @Author: haoyongdong.hyd@antgroup.com
@@ -53,6 +55,7 @@ public class TuGraphDbRpcClient {
     // Attributes common to all types of clients
     private TuGraphSingleRpcClient leaderClient;
     private final List<TuGraphSingleRpcClient> rpcClientPool = new CopyOnWriteArrayList<>();
+    private final Set<String> failUrls = new CopyOnWriteArraySet<>();
     private List<UserDefinedProcedure> userDefinedProcedures = new CopyOnWriteArrayList<>();
     private List<BuiltInProcedure> builtInProcedures = new CopyOnWriteArrayList<>();
 
@@ -82,18 +85,26 @@ public class TuGraphDbRpcClient {
     }
 
     public String callCypher(String cypher, String graph, double timeout) throws Exception {
+        return callCypher(cypher, graph, timeout, false);
+    }
+
+    public String callCypher(String cypher, String graph, double timeout, boolean withHeader) throws Exception {
         if (clientType == ClientType.SINGLE_CONNECTION){
-            return baseClient.callCypher(cypher, graph, timeout);
+            return baseClient.callCypher(cypher, graph, timeout, withHeader);
         } else {
-            return doubleCheckQuery(()-> getClient(Lgraph.ProtoGraphQueryType.CYPHER, cypher, graph).callCypher(cypher, graph, timeout));
+            return doubleCheckQuery(()-> getClient(Lgraph.ProtoGraphQueryType.CYPHER, cypher, graph).callCypher(cypher, graph, timeout, withHeader));
         }
     }
 
     public String callGql(String gql, String graph, double timeout) throws Exception {
+        return callGql(gql, graph, timeout, false);
+    }
+
+    public String callGql(String gql, String graph, double timeout, boolean withHeader) throws Exception {
         if (clientType == ClientType.SINGLE_CONNECTION){
-            return baseClient.callGql(gql, graph, timeout);
+            return baseClient.callGql(gql, graph, timeout, withHeader);
         } else {
-            return doubleCheckQuery(()-> getClient(Lgraph.ProtoGraphQueryType.GQL, gql, graph).callGql(gql, graph, timeout));
+            return doubleCheckQuery(()-> getClient(Lgraph.ProtoGraphQueryType.GQL, gql, graph).callGql(gql, graph, timeout, withHeader));
         }
     }
 
@@ -101,8 +112,16 @@ public class TuGraphDbRpcClient {
         return doubleCheckQuery(()-> getClientByNode(url).callCypher(cypher, graph, timeout));
     }
 
+    public String callCypher(String cypher, String graph, double timeout, String url, boolean withHeader) throws Exception {
+        return doubleCheckQuery(()-> getClientByNode(url).callCypher(cypher, graph, timeout, withHeader));
+    }
+
     public String callGql(String gql, String graph, double timeout, String url) throws Exception {
         return doubleCheckQuery(()-> getClientByNode(url).callGql(gql, graph, timeout));
+    }
+
+    public String callGql(String gql, String graph, double timeout, String url, boolean withHeader) throws Exception {
+        return doubleCheckQuery(()-> getClientByNode(url).callGql(gql, graph, timeout, withHeader));
     }
 
     public String callCypherToLeader(String cypher, String graph, double timeout) throws Exception {
@@ -110,6 +129,14 @@ public class TuGraphDbRpcClient {
             return baseClient.callCypher(cypher, graph, timeout);
         } else {
             return doubleCheckQuery(()-> leaderClient.callCypher(cypher, graph, timeout));
+        }
+    }
+
+    public String callCypherToLeader(String cypher, String graph, double timeout, boolean withHeader) throws Exception {
+        if (clientType == ClientType.SINGLE_CONNECTION){
+            return baseClient.callCypher(cypher, graph, timeout, withHeader);
+        } else {
+            return doubleCheckQuery(()-> leaderClient.callCypher(cypher, graph, timeout, withHeader));
         }
     }
 
@@ -121,15 +148,23 @@ public class TuGraphDbRpcClient {
         }
     }
 
+    public String callGqlToLeader(String gql, String graph, double timeout, boolean withHeader) throws Exception {
+        if (clientType == ClientType.SINGLE_CONNECTION){
+            return baseClient.callGql(gql, graph, timeout, withHeader);
+        } else {
+            return doubleCheckQuery(()-> leaderClient.callGql(gql, graph, timeout, withHeader));
+        }
+    }
+
     public String callProcedure(String procedureType, String procedureName, String param, double procedureTimeOut,
-                             boolean inProcess, String graph) throws Exception {
+                                boolean inProcess, String graph) throws Exception {
         return callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, false);
     }
 
     public String callProcedure(String procedureType, String procedureName, String param, double procedureTimeOut,
-                                boolean inProcess, String graph, boolean jsonFormat) throws Exception {
+                                boolean inProcess, String graph, boolean withHeader) throws Exception {
         if (clientType == ClientType.SINGLE_CONNECTION) {
-            return baseClient.callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, jsonFormat);
+            return baseClient.callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, withHeader);
         } else {
             return doubleCheckQuery(()-> {
                 boolean readOnly = false;
@@ -140,7 +175,7 @@ public class TuGraphDbRpcClient {
                     }
                 }
                 return getClient(readOnly)
-                        .callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, jsonFormat);
+                        .callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, withHeader);
             });
         }
     }
@@ -151,26 +186,26 @@ public class TuGraphDbRpcClient {
     }
 
     public String callProcedure(String procedureType, String procedureName, String param, double procedureTimeOut,
-                                boolean inProcess, String graph, boolean jsonFormat, String url) throws Exception {
-        return doubleCheckQuery(()-> getClientByNode(url).callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, jsonFormat));
+                                boolean inProcess, String graph, boolean withHeader, String url) throws Exception {
+        return doubleCheckQuery(()-> getClientByNode(url).callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, withHeader));
     }
 
     public String callProcedureToLeader(String procedureType, String procedureName, String param, double procedureTimeOut,
-                                boolean inProcess, String graph) throws Exception {
+                                        boolean inProcess, String graph) throws Exception {
         return callProcedureToLeader(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, false);
     }
 
     public String callProcedureToLeader(String procedureType, String procedureName, String param, double procedureTimeOut,
-                                        boolean inProcess, String graph, boolean jsonFormat) throws Exception {
+                                        boolean inProcess, String graph, boolean withHeader) throws Exception {
         if (clientType == ClientType.SINGLE_CONNECTION) {
-            return baseClient.callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, jsonFormat);
+            return baseClient.callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, withHeader);
         } else {
-            return doubleCheckQuery(()-> leaderClient.callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, jsonFormat));
+            return doubleCheckQuery(()-> leaderClient.callProcedure(procedureType, procedureName, param, procedureTimeOut, inProcess, graph, withHeader));
         }
     }
 
     public boolean loadProcedure(String sourceFile, String procedureType, String procedureName, String codeType,
-                              String procedureDescription, boolean readOnly, String version, String graph) throws Exception {
+                                 String procedureDescription, boolean readOnly, String version, String graph) throws Exception {
         if (clientType == ClientType.SINGLE_CONNECTION) {
             return baseClient.loadProcedure(sourceFile, procedureType, procedureName, codeType, procedureDescription, readOnly, version, graph);
         } else {
@@ -324,7 +359,10 @@ public class TuGraphDbRpcClient {
 
     private TuGraphSingleRpcClient getClient(boolean isReadQuery) throws Exception {
         if (isReadQuery) {
-            if (rpcClientPool.size() == 0){
+            if (CollectionUtils.isNotEmpty(failUrls)) {
+                loadRpcClient(failUrls);
+            }
+            if (CollectionUtils.isEmpty(rpcClientPool)) {
                 throw new Exception("all instance is down, refuse req!");
             }
             TuGraphSingleRpcClient rpcClient = rpcClientPool.get(rpcClientPool.size() - 1);
@@ -363,7 +401,14 @@ public class TuGraphDbRpcClient {
                 }
             });
         } else {
-            for (String url : urls) {
+            loadRpcClient(new HashSet<>(urls));
+        }
+    }
+
+    private void loadRpcClient(Set<String> urlList) {
+        Set<String> failList = new HashSet<>();
+        for (String url: urlList) {
+            try {
                 TuGraphSingleRpcClient rpcClient = new TuGraphSingleRpcClient("list://" + url, user, password);
                 String result = rpcClient.callCypher("CALL dbms.ha.clusterInfo()", "default", 10);
                 ClusterInfo clusterInfo = JSON.parseObject(JSON.parseArray(result).get(0).toString(), new TypeReference<ClusterInfo>(){});
@@ -371,8 +416,12 @@ public class TuGraphDbRpcClient {
                     leaderClient = rpcClient;
                 }
                 rpcClientPool.add(rpcClient);
+            } catch (Exception e) {
+                failList.add(url);
             }
         }
+        failUrls.clear();
+        failUrls.addAll(failList);
     }
 
     /**
@@ -406,9 +455,9 @@ public class TuGraphDbRpcClient {
                 return queryInterface.method();
             } catch (Exception e2) {
                 log.error(e2.getMessage());
-                throw e2;
             }
         }
+        return null;
     }
 
     private static class TuGraphSingleRpcClient {
@@ -443,9 +492,9 @@ public class TuGraphDbRpcClient {
             this.url = url;
         }
 
-        private String handleGraphQueryRequest(Lgraph.ProtoGraphQueryType type, String query, String graph, double timeout) {
+        private String handleGraphQueryRequest(Lgraph.ProtoGraphQueryType type, String query, String graph, double timeout, boolean withHeader) {
             Lgraph.GraphQueryRequest queryRequest =
-                    Lgraph.GraphQueryRequest.newBuilder().setType(type).setQuery(query).setResultInJsonFormat(true)
+                    Lgraph.GraphQueryRequest.newBuilder().setType(type).setQuery(query).setResultInJsonFormat(!withHeader)
                             .setGraph(graph).setTimeout(timeout).build();
             Lgraph.LGraphRequest request =
                     Lgraph.LGraphRequest.newBuilder().setGraphQueryRequest(queryRequest).setToken(this.token)
@@ -455,15 +504,71 @@ public class TuGraphDbRpcClient {
                 throw new TuGraphDbRpcException(response.getErrorCode(), response.getError(), "handleGraphQueryRequest");
             }
             serverVersion = Math.max(response.getServerVersion(), serverVersion);
-            return response.getGraphQueryResponse().getJsonResult();
+            if (!withHeader){
+                return response.getGraphQueryResponse().getJsonResult();
+            } else {
+                Lgraph.GraphQueryResult graphQueryResult = response.getGraphQueryResponse().getBinaryResult();
+                JSONObject ans = new JSONObject();
+                JSONArray header = new JSONArray(), result = new JSONArray();
+                for (Lgraph.Header headerKV : graphQueryResult.getHeaderList()) {
+                    JSONObject headerItem = new JSONObject();
+                    headerItem.put("name", headerKV.getName());
+                    headerItem.put("type", headerKV.getType());
+                    header.add(headerItem);
+                }
+                ans.put("header", header);
+                for (Lgraph.ListOfProtoFieldData resultData : graphQueryResult.getResultList()) {
+                    JSONArray resultItem = new JSONArray();
+                    for (Lgraph.ProtoFieldData fieldData : resultData.getValuesList()) {
+                        switch (fieldData.getDataCase()) {
+                            case BOOLEAN:
+                                resultItem.add(fieldData.getBoolean());
+                                break;
+                            case INT8_:
+                                resultItem.add(fieldData.getInt8());
+                                break;
+                            case INT16_:
+                                resultItem.add(fieldData.getInt16());
+                                break;
+                            case INT32_:
+                                resultItem.add(fieldData.getInt32());
+                                break;
+                            case INT64_:
+                                resultItem.add(fieldData.getInt64());
+                                break;
+                            case SP:
+                                resultItem.add(fieldData.getSp());
+                                break;
+                            case DP:
+                                resultItem.add(fieldData.getDp());
+                                break;
+                            case DATE:
+                                resultItem.add(fieldData.getDate());
+                                break;
+                            case DATETIME:
+                                resultItem.add(fieldData.getDatetime());
+                                break;
+                            case STR:
+                                resultItem.add(fieldData.getStr());
+                                break;
+                            case BLOB:
+                                resultItem.add(fieldData.getBlob());
+                                break;
+                        }
+                    }
+                    result.add(resultItem);
+                }
+                ans.put("result", result);
+                return ans.toString();
+            }
         }
 
-        private String handleCypherRequest(String query, String graph, double timeout) {
-            return handleGraphQueryRequest(Lgraph.ProtoGraphQueryType.CYPHER, query, graph, timeout);
+        private String handleCypherRequest(String query, String graph, double timeout, boolean withHeader) {
+            return handleGraphQueryRequest(Lgraph.ProtoGraphQueryType.CYPHER, query, graph, timeout, withHeader);
         }
 
-        private String handleGqlRequest(String query, String graph, double timeout) {
-            return handleGraphQueryRequest(Lgraph.ProtoGraphQueryType.GQL, query, graph, timeout);
+        private String handleGqlRequest(String query, String graph, double timeout, boolean withHeader) {
+            return handleGraphQueryRequest(Lgraph.ProtoGraphQueryType.GQL, query, graph, timeout, withHeader);
         }
 
         // parse delimiter and process strings like \r \n \002 \0xA
@@ -659,12 +764,20 @@ public class TuGraphDbRpcClient {
             return url;
         }
 
+        public String callCypher(String cypher, String graph, double timeout, boolean withHeader) {
+            return handleCypherRequest(cypher, graph, timeout, withHeader);
+        }
+
         public String callCypher(String cypher, String graph, double timeout) {
-            return handleCypherRequest(cypher, graph, timeout);
+            return handleCypherRequest(cypher, graph, timeout, false);
+        }
+
+        public String callGql(String gql, String graph, double timeout, boolean withHeader) {
+            return handleGqlRequest(gql, graph, timeout, withHeader);
         }
 
         public String callGql(String gql, String graph, double timeout) {
-            return handleGqlRequest(gql, graph, timeout);
+            return handleGqlRequest(gql, graph, timeout, false);
         }
 
         public String callProcedure(String procedureType, String procedureName, String param, double procedureTimeOut,
@@ -676,18 +789,18 @@ public class TuGraphDbRpcClient {
         }
 
         public String callProcedure(String procedureType, String procedureName, String param, double procedureTimeOut,
-                                    boolean inProcess, String graph, boolean jsonFormat) {
+                                    boolean inProcess, String graph, boolean withHeader) {
             Lgraph.PluginRequest.PluginType type =
                     "CPP".equals(procedureType) ? Lgraph.PluginRequest.PluginType.CPP : Lgraph.PluginRequest.PluginType.PYTHON;
-            ByteString resp = callProcedure(type, procedureName, ByteString.copyFromUtf8(param), graph, procedureTimeOut, inProcess, jsonFormat);
+            ByteString resp = callProcedure(type, procedureName, ByteString.copyFromUtf8(param), graph, procedureTimeOut, inProcess, withHeader);
             return resp.toStringUtf8();
         }
 
         public ByteString callProcedure(Lgraph.PluginRequest.PluginType type, String name, ByteString param,
-                                        String graph, double timeout, boolean inProcess, boolean jsonFormat) {
+                                        String graph, double timeout, boolean inProcess, boolean withHeader) {
             Lgraph.CallPluginRequest vreq =
                     Lgraph.CallPluginRequest.newBuilder().setName(name).setParam(param).setTimeout(timeout)
-                            .setInProcess(inProcess).setResultInJsonFormat(jsonFormat).build();
+                            .setInProcess(inProcess).setResultInJsonFormat(withHeader).build();
             Lgraph.PluginRequest req =
                     Lgraph.PluginRequest.newBuilder().setType(type).setCallPluginRequest(vreq).setGraph(graph).build();
             Lgraph.LGraphRequest request =
@@ -696,7 +809,7 @@ public class TuGraphDbRpcClient {
             if (response.getErrorCode().getNumber() != Lgraph.LGraphResponse.ErrorCode.SUCCESS_VALUE) {
                 throw new TuGraphDbRpcException(response.getErrorCode(), response.getError(), "CallProcedure");
             }
-            if (jsonFormat) {
+            if (withHeader) {
                 return response.getPluginResponse().getCallPluginResponse().getJsonResultBytes();
             } else {
                 return response.getPluginResponse().getCallPluginResponse().getReply();
@@ -779,7 +892,7 @@ public class TuGraphDbRpcClient {
             return true;
         }
 
-        public boolean importSchemaFromContent(String schema, String graph, double timeout) throws InputException{
+        public boolean importSchemaFromContent(String schema, String graph, double timeout) throws InputException, InvalidProtocolBufferException {
             byte[] textByte = schema.getBytes(StandardCharsets.UTF_8);
             String schema64 = Base64.getEncoder().encodeToString(textByte);
             String sb = "CALL db.importor.schemaImportor('"
@@ -787,14 +900,14 @@ public class TuGraphDbRpcClient {
                     + "')";
             String res = callCypher(sb, graph, timeout);
             // this built-in procedure always returns "[]" for null.
-            if (JSONArray.parseArray(res).size() != 0) {
+            if (!JSONArray.parseArray(res).isEmpty()) {
                 throw new InputException(res);
             }
             return true;
         }
 
         public boolean importDataFromContent(String desc, String data, String delimiter,
-                                             boolean continueOnError, int threadNums, String graph, double timeout) throws UnsupportedEncodingException {
+                                             boolean continueOnError, int threadNums, String graph, double timeout) {
             byte[] textByteDesc = desc.getBytes(StandardCharsets.UTF_8);
             byte[] textByteData = data.getBytes(StandardCharsets.UTF_8);
             String desc64 = Base64.getEncoder().encodeToString(textByteDesc);
@@ -812,7 +925,7 @@ public class TuGraphDbRpcClient {
                     + "')";
             String res = callCypher(sb, graph, timeout);
             // this built-in procedure always returns "[]" for null.
-            if (JSONArray.parseArray(res).size() != 0) {
+            if (!JSONArray.parseArray(res).isEmpty()) {
                 throw new InputException(res);
             }
             return true;
@@ -836,7 +949,7 @@ public class TuGraphDbRpcClient {
                     + "')";
             String res = callCypher(sb, graph, timeout);
             // this built-in procedure always returns "[]" for null.
-            if (JSONArray.parseArray(res).size() != 0) {
+            if (!JSONArray.parseArray(res).isEmpty()) {
                 throw new InputException(res);
             }
             return true;
@@ -892,11 +1005,11 @@ public class TuGraphDbRpcClient {
                             + parseDelimiter(delimiter)
                             + "')";
                     String res = callCypher(sb, graph, timeout);
-                    if (JSONArray.parseArray(res).size() != 0) {
+                    if (!JSONArray.parseArray(res).isEmpty()) {
                         throw new InputException(res);
                     }
                     // this built-in procedure always returns "[]" for null.
-                    if (JSONArray.parseArray(res).size() != 0) {
+                    if (!JSONArray.parseArray(res).isEmpty()) {
                         throw new InputException(res);
                     }
                     buf = cutter.cut();
