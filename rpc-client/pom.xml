@@ -68,6 +68,8 @@
                             <inputDirectories>
                                 <include>src/main/proto</include>
                             </inputDirectories>
+                            <!-- macos arm 需要手动下载protoc二进制 并指定目录指定 其它系统注释该行即可 -->
+                            <protocCommand>/work/protoc-3.6.0/bin/protoc</protocCommand>
                         </configuration>
                     </execution>
                 </executions>
